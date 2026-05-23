@@ -11,9 +11,8 @@
 #include <stdarg.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <server.h>
 
-// Eliminada la declaración global problemática
-// struct addrinfo hints, *resultado;  // ← NO PONGAS ESTO
 
 int errexit(const char *format, ...){
     va_list args;
@@ -25,20 +24,20 @@ int errexit(const char *format, ...){
 
 int socketPasivo(const char *servicio, const char *transporte, int longitud_conexiones) { 
     int descriptorSocket;
-    struct addrinfo hints, *resultado, *rp;  // Solo declaración local
+    struct addrinfo hints, *resultado, *rp;
     
     // Iniciar en cero la estructura 
     memset(&hints, 0, sizeof(hints));
     
     // Elegir ipV4 
     hints.ai_family = AF_INET;
-    hints.ai_flags = AI_PASSIVE;
+    hints.ai_flags = AI_PASSIVE;  // IMPORTANTE: para socket pasivo/server
     
     // Elegir el protocolo UDP o TCP 
     if(strcmp(transporte, "udp") == 0) { 
-        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_socktype = SOCK_DGRAM; // udp
     } else { 
-        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_socktype = SOCK_STREAM; // tcp 
     }
     
     // Agregar la direccion ip, mapear el nombre del servicio a un puerto
@@ -56,7 +55,7 @@ int socketPasivo(const char *servicio, const char *transporte, int longitud_cone
             
         // Asociar el socket a la direccion 
         if (bind(descriptorSocket, rp->ai_addr, rp->ai_addrlen) == 0)
-            break;
+            break;  // Éxito
             
         close(descriptorSocket);
     }
@@ -66,7 +65,7 @@ int socketPasivo(const char *servicio, const char *transporte, int longitud_cone
         errexit("No se pudo crear/bindear el socket para el puerto %s: %s\n", servicio, strerror(errno));
     }
     
-    freeaddrinfo(resultado);
+    freeaddrinfo(resultado);  // Liberar memoria
     
     if (hints.ai_socktype == SOCK_STREAM) {
         if (listen(descriptorSocket, longitud_conexiones) < 0) {
@@ -75,14 +74,15 @@ int socketPasivo(const char *servicio, const char *transporte, int longitud_cone
         }
     }
     
-    return descriptorSocket;
-}
+    return descriptorSocket;  // Retornar el descriptor
+    }
 
 int main(){ 
     int sock = socketPasivo("8080", "tcp", 5);
-    if (sock > 0) {
-        printf("Socket creado exitosamente\n");
-        close(sock);
+    if (sock < 0) {
+        fprintf(stderr,"Error creando el socket\n");
+        return 1;
     }
-    return 0;
+    printf("Socket creado exitosamente\n");
+    return server_run(sock);
 }
