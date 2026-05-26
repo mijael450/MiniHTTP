@@ -10,7 +10,7 @@ resultado_archivo_t leer_archivo(const char *ruta_archivo) {
     resultado.longitud  = 0;
     resultado.error     = ARCHIVO_OK;
 
-    /* Verificar que la ruta no salga de www/ */
+    /* Verificar que la ruta de www/ */
     char ruta_www[PATH_MAX];
     if (realpath("www", ruta_www) == NULL) {
         resultado.error = ARCHIVO_ERROR_INTERNO;

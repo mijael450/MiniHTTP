@@ -21,8 +21,7 @@ static int enviar_todo(int descriptor_cliente, const char *datos, size_t longitu
 
         if (resultado < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                /* Buffer lleno, esperar un momento e intentar de nuevo */
-                usleep(1000); /* esperar 1ms */
+                usleep(1000); 
                 continue;
             }
             perror("write");
@@ -73,7 +72,7 @@ int http_handle(int descriptor_cliente, char *buffer_solicitud, int bytes_leidos
         return 0;
     }
 
-    /* Si la URI es "/" servir index.html por defecto */
+    /* Si la URI es / servir index.html por defecto */
     if (strcmp(uri, "/") == 0) {
         strcpy(uri, "/index.html");
     }

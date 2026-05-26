@@ -7,11 +7,15 @@
 #include <sys/socket.h>   
 #include <netinet/in.h>   
 #include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <signal.h>
 #include "server.h"
 #include "http.h"
 
+
 /* 
- * Pone un socket en modo no-bloqueante.
+ * Pone un socket en modo no bloqueante.
  */
 static int poner_socket_no_bloqueante(int descriptor_socket) {
     int banderas_actuales = fcntl(descriptor_socket, F_GETFL, 0);
@@ -67,7 +71,6 @@ static int atender_cliente(int descriptor_cliente) {
 
 /*
  * Bucle principal del servidor.
- * Recibe el socket pasivo ya creado y vinculado.
  */
 int server_run(int descriptor_socket_servidor) {
 
@@ -94,7 +97,7 @@ int server_run(int descriptor_socket_servidor) {
     struct epoll_event eventos_listos[MAX_EVENTOS];
 
     printf("Servidor listo. Esperando conexiones en el puerto 8080...\n");
-
+    signal(SIGCHLD, SIG_IGN);
     while (1) {
 
         int cantidad_eventos_listos = epoll_wait(
@@ -106,14 +109,14 @@ int server_run(int descriptor_socket_servidor) {
 
         if (cantidad_eventos_listos < 0) {
             if (errno == EINTR) {
-                /* Una señal del sistema interrumpio la espera normal).*/
+
                 continue;
             }
             perror("epoll_wait");
             break;
         }
 
-        /* Procesar cada evento que reportado como listo*/
+        /*Procesar cada evento que reportado como listo*/
         for (int indice = 0; indice < cantidad_eventos_listos; indice++) {
 
             int descriptor_con_actividad = eventos_listos[indice].data.fd;
@@ -124,6 +127,7 @@ int server_run(int descriptor_socket_servidor) {
                  */
                 struct sockaddr_storage direccion_cliente;
                 socklen_t longitud_direccion_cliente = sizeof(direccion_cliente);
+
 
                 int descriptor_cliente_nuevo = accept(
                     descriptor_socket_servidor,
@@ -143,21 +147,22 @@ int server_run(int descriptor_socket_servidor) {
 
                 printf("Cliente conectado (descriptor %d)\n", descriptor_cliente_nuevo);
 
-            } else {
-                /*
-                 * Un cliente ya existente tiene actividad:
-                 * llegaron datos de una solicitud HTTP.
-                 */
-                int resultado = atender_cliente(descriptor_con_actividad);
-
-                if (resultado < 0) {
-
-                    epoll_ctl(descriptor_epoll, EPOLL_CTL_DEL,
-                              descriptor_con_actividad, NULL);
-                    close(descriptor_con_actividad);
-                    printf("Cliente desconectado (descriptor %d)\n", descriptor_con_actividad);
+                pid_t pid = fork(); 
+                if(pid < 0) {
+                    perror("fork");
+                    close(descriptor_cliente_nuevo);
+                    continue;
+                }else if (pid == 0){
+                    /* Proceso hijo*/ 
+                    close(descriptor_socket_servidor);
+                    close(descriptor_epoll);
+                    atender_cliente(descriptor_cliente_nuevo); 
+                    close(descriptor_cliente_nuevo);
+                    exit(0);
+                }else{
+                    close(descriptor_cliente_nuevo);
                 }
-            }
+            } 
         }
     }
 

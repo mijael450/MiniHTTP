@@ -1,8 +1,27 @@
 html{
-    background-color: aqua; 
+    background-color: gray; 
     
+}
+h1{
+    text-align: center;
 }
 
 img{
     height: 200px;
+}
+#info-js {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: white;
+    border-radius: 8px;
+
+}
+
+button {
+    padding: 8px 16px;
+    cursor: pointer;
+    background-color: #333;
+    color: white;
+    border: none;
+    border-radius: 4px;
 }
