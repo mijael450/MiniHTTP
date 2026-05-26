@@ -1,23 +1,34 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "http.h"
+#include "mime.h"
+#include "files.h"
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
+#include <errno.h>
+#include <unistd.h>
 
-/* Envía todos los bytes, reintentando si write() no los envió todos de una vez */
 static int enviar_todo(int descriptor_cliente, const char *datos, size_t longitud) {
     size_t bytes_enviados = 0;
 
     while (bytes_enviados < longitud) {
         ssize_t resultado = write(
             descriptor_cliente,
-            datos + bytes_enviados,        
-            longitud - bytes_enviados      
+            datos + bytes_enviados,
+            longitud - bytes_enviados
         );
+
         if (resultado < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* Buffer lleno, esperar un momento e intentar de nuevo */
+                usleep(1000); /* esperar 1ms */
+                continue;
+            }
             perror("write");
             return -1;
         }
+
         bytes_enviados += resultado;
     }
 
@@ -31,11 +42,10 @@ int http_handle(int descriptor_cliente, char *buffer_solicitud, int bytes_leidos
     char uri[MAX_URI];
     char version[16];
 
-    /* Extraer las tres partes de la primera línea */
     int partes_encontradas = sscanf(buffer_solicitud, "%15s %2047s %15s", 
                                      metodo, uri, version);
 
-    /* Si no tiene las 3 partes, la solicitud está malformada */
+
     if (partes_encontradas != 3) {
         http_send_error(descriptor_cliente, 400, "Bad Request");
         return 0;
@@ -45,9 +55,21 @@ int http_handle(int descriptor_cliente, char *buffer_solicitud, int bytes_leidos
     printf("URI:     [%s]\n", uri);
     printf("Version: [%s]\n", version);
 
-    /* Solo aceptamos GET, cualquier otro método → 405 */
+    char *linea_connection = strstr(buffer_solicitud, "Connection:"); 
+    int keep_alive = 0; 
+    if(linea_connection != NULL){
+        if(strstr(linea_connection, "keep-alive")){
+            keep_alive = 1;
+        }
+    }
+
+    /* Solo se acepta GET */
     if (strcmp(metodo, "GET") != 0) {
         http_send_error(descriptor_cliente, 405, "Method Not Allowed");
+        return 0;
+    }
+    if (strstr(uri, "..") != NULL) {
+        http_send_error(descriptor_cliente, 403, "Forbidden");
         return 0;
     }
 
@@ -62,43 +84,38 @@ int http_handle(int descriptor_cliente, char *buffer_solicitud, int bytes_leidos
 
     printf("Buscando archivo: [%s]\n", ruta_archivo);
 
-    /* Abrir el archivo */
-    FILE *archivo = fopen(ruta_archivo, "rb");
-    if (archivo == NULL) {
+    resultado_archivo_t archivo = leer_archivo(ruta_archivo);
+
+    if (archivo.error == ARCHIVO_NO_ENCONTRADO) {
         http_send_error(descriptor_cliente, 404, "Not Found");
         return 0;
     }
-
-    /* Obtener el tamaño del archivo */
-    fseek(archivo, 0, SEEK_END);
-    long longitud_archivo = ftell(archivo);
-    fseek(archivo, 0, SEEK_SET);
-
-    /* Leer el contenido completo */
-    char *contenido = malloc(longitud_archivo);
-    if (contenido == NULL) {
-        fclose(archivo);
+    if (archivo.error == ARCHIVO_FORBIDDEN) {
+        http_send_error(descriptor_cliente, 403, "Forbidden");
+        return 0;
+    }
+    if (archivo.error == ARCHIVO_ERROR_INTERNO) {
         http_send_error(descriptor_cliente, 500, "Internal Server Error");
         return 0;
     }
-    fread(contenido, 1, longitud_archivo, archivo);
-    fclose(archivo);
 
-    /* Enviar headers 200 OK */
+    const char *tipo_mime = mime_obtener(ruta_archivo);
     char headers[256];
     int longitud_headers = snprintf(headers, sizeof(headers),
         "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
+        "Content-Type: %s\r\n"
         "Content-Length: %ld\r\n"
-        "Connection: close\r\n"
+        "Connection: %s\r\n"
         "\r\n",
-        longitud_archivo);
+        tipo_mime, archivo.longitud,
+        keep_alive ? "keep-alive" : "close");
 
     enviar_todo(descriptor_cliente, headers, longitud_headers);
-    enviar_todo(descriptor_cliente, contenido, longitud_archivo);
+    enviar_todo(descriptor_cliente, archivo.contenido, archivo.longitud);
 
-    free(contenido);
-    return 0;
+    free(archivo.contenido);
+   
+    return keep_alive;
 }
 
 
